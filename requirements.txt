@@ -1,0 +1,8 @@
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+seaborn>=0.12
+plotly>=5.20
+kaleido>=1.0.0
+nbformat>=4.2.0
+ipykernel>=6.0

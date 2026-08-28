@@ -1,0 +1,55 @@
+Nome do recurso	Tipo	Conteúdo	Tópico	Obs
+Boas vindas!!!	Página	Informativo	Geral	
+Plano de ensino (unificado)	PDF	Informativo	Geral	
+Cronograma detalhado	Planilha	Informativo	Geral	
+Diário de classe	Planilha	Informativo	Geral	
+Lançamento de notas e frequência no sistema acadêmico	PDF	Informativo	Geral	
+Cálculo de notas para Exame Especial	Código Python	Informativo	Geral	
+Escolha para o EXAME ESPECIAL	Enquete	Informativo	Geral	
+Página da disciplina	Página	Informativo	Geral	
+Agenda do Professor	Página	Informativo	Geral	
+Atendimentos: Extraclase, Monitoria e Tutoria	Página	Informativo	Geral	
+opCoders Judge (Corretor automático de exercícios práticos)	Página	Informativo	Geral	
+Informações sobre recursos didáticos	Página	Informativo	Geral	
+Conteúdo teórico (livro texto)	Página	Didático	Geral	
+Resumo para a Prova Teórica 1 (PT1)	Página	Didático	PT1	
+Resumo para a Prova Teórica 1 (PT2)	Página	Didático	PT2	
+[T] Apresentação da disciplina	Aula Slides PDF	Didático	Geral	
+Material complementar - Videoaula: Apresentação da disciplina (29 min)	Aula Vídeo	Didático	Geral	
+[T] Cap. 1 - Introdução	Aula Slides PDF	Didático	PT1	
+Material complementar - Videoaula: Introdução (37 min)	Aula Vídeo	Didático	PT1	
+[AP-1.1] Ambiente de programação	AP PDF	AP	PT1	
+[T] Caps. 2 e 3 -Conceitos básicos	Aula Slides PDF	Didático	PT1	
+Material complementar - Videoaula: Conceitos básicos (120 min)	Aula Vídeo	Didático	PT1	
+[AP-1.2] Conhecendo o corretor automático	AP PDF	AP	PT1	
+[AP-2_3] Variáveis, expressões, entrada e saída	AP PDF	AP	PT1	
+[T] Estruturas de Decisão	Aula Slides PDF	Didático	PT1	
+Material complementar - Videoaula: Estruturas de Decisão (87 min)	Aula Vídeo	Didático	PT1	
+[AP-4.1] Estruturas de Decisão Simples	AP PDF	AP	PT1	
+[AP-4.2] Estruturas de Decisão Aninhadas	AP PDF	AP	PT1	
+[T] Estrutura de Repetição: WHILE	Aula Slides PDF	Didático	PT1	
+Material complementar - Videoaula: Estrutura de Repetição: WHILE (79 min)	Aula Vídeo	Didático	PT1	
+Questionário estrutura WHILE	Questionário Teórico	Avaliativo	PT1	Foi um questionário ocasional devido a um cancelamento de aula.
+[AP-5.1] Estrutura de Repetição: WHILE	AP PDF	AP	PT1	
+[T] Estrutura de Repetição: FOR	Aula Slides PDF	Didático	PT1	
+Material complementar - Videoaula: Estrutura de Repetição: FOR (69 min)	Aula Vídeo	Didático	PT1	
+[AP-5.2] Estrutura de Repetição: FOR	AP PDF	AP	PT1	
+[T] Estrutura de Repetição - Laços Aninhados	Aula Slides PDF	Didático	PT2	
+Material complementar - Videoaula: Estrutura de Repetição: Laços Aninhados (46 min)	Aula Vídeo	Didático	PT2	
+[AP-5.3] Estrutura de Repetição - Laços Aninhados	AP PDF	AP	PT2	
+[T] Implementação de Funções	Aula Slides PDF	Didático	PT2	
+Material complementar - Videoaula: Implementação de Funções (57 min)	Aula Vídeo	Didático	PT2	
+[AP-6.1] Implementação de Funções	AP PDF	AP	PT2	
+[AP-6.2] Implementação de Funções	AP PDF	AP	PT2	
+Biblioteca padrão para Vetores e Matrizes	Código Python	Didático	PT2	
+[T] Estruturas Homogêneas: VETOR	Aula Slides PDF	Didático	PT2	
+Material complementar - Videoaula: Estruturas Homogêneas: VETOR (100 min)	Aula Vídeo	Didático	PT2	
+[AP-7.1] Estrutura Homogênea - VETOR	AP PDF	AP	PT2	
+[AP-7.2] Estrutura Homogênea - VETOR	AP PDF	AP	PT2	
+[T] Estruturas Homogêneas: MATRIZ	Aula Slides PDF	Didático	PT2	
+Material complementar - Videoaula: Estruturas Homogêneas: MATRIZ (61 min)	Aula Vídeo	Didático	PT2	
+[AP-7.3] Estrutura Homogênea - MATRIZ	AP PDF	AP	PT2	
+[AP-7.4] Estrutura Homogênea - MATRIZ	AP PDF	AP	PT2	
+[T] Estruturas Heterogêneas: REGISTRO	Aula Slides PDF	Didático	Geral	
+Material complementar - Videoaula: Estruturas Heterogêneas: REGISTRO (25 min)	Aula Vídeo	Didático	Geral	
+[AP-8] Estruturas Heterogêneas - REGISTRO	AP PDF	AP	Geral	

@@ -29,16 +29,24 @@
 # - **Saneamento Decimal:** Correção de strings numéricas no formato brasileiro (`,` para `.`).
 # - **Cálculo de SSR e Médias:** Geração automatizada da taxa contínua de prontidão (**Submission Success Rate**) e médias ponderadas bimestrais.
 
-# %% colab={"base_uri": "https://localhost:8080/"} id="KCXIirAuY3rw" outputId="0b41525f-5635-4866-df92-2998c5d10be5"
+# %% [markdown] id="reqsInstallMd"
+# # Instalação de dependências
+#
+# Instala as bibliotecas listadas em `requirements.txt`. Execute o notebook a
+# partir da raiz do projeto (onde o arquivo `requirements.txt` está) para que
+# o caminho relativo abaixo seja resolvido corretamente.
+
+# %% id="reqsInstallCell"
 import sys, subprocess
-# Kaleido >= 1.0 é necessário para exportar imagens com as versões atuais do Plotly.
-# Na primeira execução local, rode também `plotly_get_chrome` uma única vez
-# (ou instale o Google Chrome/Chromium manualmente) -- o Kaleido v1+ depende
-# dele para renderizar as imagens exportadas (fig.write_image(...)).
-subprocess.run([sys.executable, "-m", "pip", "install", "-U", "kaleido>=1.0.0"])
+subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
 
 # %% [markdown] id="FCEOvkqpowln"
 # # Imports
+#
+# Kaleido >= 1.0 é necessário para exportar imagens com as versões atuais do Plotly;
+# na primeira execução local, rode também `plotly_get_chrome` uma única vez
+# (ou instale o Google Chrome/Chromium manualmente) -- o Kaleido v1+ depende
+# dele para renderizar as imagens exportadas (fig.write_image(...)).
 
 # %% colab={"base_uri": "https://localhost:8080/"} id="NpKpKPKJotGf" outputId="e6d133e8-f80a-4cd2-b1e0-a475bb04773d"
 # =============================================================================
