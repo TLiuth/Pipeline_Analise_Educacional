@@ -150,6 +150,9 @@ elif periodo_input == "4": # 26.1
 SEPARADOR_CSV  = ","
 SEPARADOR_TSV  = "\t"
 DETALHAMENTO_OUTPUT = "_(comReprFaltas)"
+# Alias em minúsculas usado pelas funções de volume de entregas
+# (plot_totalEntregas_box / sheet_totalEntregas_box) como sufixo de arquivo.
+detalhamento = DETALHAMENTO_OUTPUT
 
 # =============================================================================
 # INFRAESTRUTURA DE DIRETÓRIOS LOCAIS (SAÍDAS)
@@ -253,21 +256,90 @@ else:
 # ENGENHARIA DE DADOS E REGRAS DE NEGÓCIO (FUNÇÕES CORE)
 # =============================================================================
 
-def padronizar_turmas_opcoders(df, col_turma='class_name'):
+# =============================================================================
+# PAREAMENTO DE TURMAS POR PERÍODO
+# =============================================================================
+# As turmas numeradas do opCoders são lecionadas/reportadas AOS PARES (ex.:
+# Turma 11 e Turma 12 formam uma única turma "11_12"), não individualmente.
+# Regra padrão (par ímpar-par consecutivo: 1_2, 3_4, ..., 19_20) aplicada a
+# todos os períodos. Validada numericamente para 24-2 contra tabela de
+# referência real (média/mediana/máx/mín/Q1/Q3 de qtd_entregas por turma) --
+# sem exceções. Para os demais períodos, a mesma regra padrão é assumida por
+# ora; ajuste "excecoes" aqui se algum período divergir (ex.: turma com
+# número ímpar sem par, fundida a outra turma etc.).
+PAREAMENTO_TURMAS_CONHECIDO = {
+    "24-2": {"excecoes": {}},
+    "25-1": {"excecoes": {}},
+    "25-2": {"excecoes": {}},
+    "26-1": {"excecoes": {}},
+}
+
+def rotulo_par_turma(numero_turma, excecoes=None):
     """
-    Agrega e padroniza as strings das turmas do opCoders extraindo o padrão numClassesFixed.
+    Dado o número de uma turma, devolve o rótulo do par ao qual ela pertence
+    (ex.: 1 e 2 -> "1_2", 11 e 12 -> "11_12"), respeitando exceções pontuais
+    informadas em `excecoes` (numero_turma -> rótulo já pronto).
     """
-    df_clean = df.copy()
-    if col_turma in df_clean.columns:
-        def extrair_num(nome):
-            if pd.isna(nome): return np.nan
-            match = re.search(r'\d+', str(nome))
-            if match:
-                return f"Turma {match.group()} ({PERIODO_LETIVO})"
+    excecoes = excecoes or {}
+    if numero_turma in excecoes:
+        return excecoes[numero_turma]
+    par_inicio = numero_turma if numero_turma % 2 == 1 else numero_turma - 1
+    return f"{par_inicio}_{par_inicio + 1}"
+
+def renomear_turmas_pareadas_com_sigla(df, col_turma='class_name', periodo_letivo=None):
+    """
+    Reescreve a coluna de turma do opCoders DIRETO DO NOME BRUTO (ex.: "Turma
+    11 - BCC104 (24.2)") no formato final "{par}-{sigla}-{período}" (ex.:
+    "1_2-BCC701-24.2", "11_12-BCC104-24.2"):
+
+    1. Extrai o número da turma do texto bruto.
+    2. Extrai a sigla do curso: BCC104 se explicitamente mencionada no nome,
+       senão BCC701 por padrão -- turmas que não especificam curso são
+       BCC701.
+    3. Agrupa as turmas numeradas aos pares (1_2, 3_4, ...) usando a regra de
+       PAREAMENTO_TURMAS_CONHECIDO para o período informado; se o período não
+       tiver entrada no dicionário, mantém o número individual e avisa.
+    4. Anexa o período extraído do próprio texto original (grafia com ponto,
+       ex. "24.2" -- preserva a grafia original dos dados brutos, não usa o
+       PERIODO_LETIVO interno "24-2").
+
+    Importante: turmas com sigla de curso diferente dentro do mesmo par
+    numérico (ex.: par 11_12 com uma seção BCC104 e outra BCC701, como ocorre
+    nos dados brutos do 24-2) geram rótulos finais DIFERENTES -- é isso que
+    permite separar as turmas por curso depois.
+    """
+    df_c = df.copy()
+    if col_turma not in df_c.columns:
+        return df_c
+
+    regra = PAREAMENTO_TURMAS_CONHECIDO.get(periodo_letivo)
+    excecoes = regra.get("excecoes", {}) if regra else {}
+    if regra is None:
+        print(f"⚠️ Sem regra de pareamento confirmada para {periodo_letivo} -- "
+              f"turmas mantidas individuais (não pareadas) no novo rótulo.")
+
+    def remapear(nome_bruto):
+        if pd.isna(nome_bruto):
+            return nome_bruto
+        texto = str(nome_bruto)
+
+        num_match = re.search(r'\d+', texto)
+        if not num_match:
             return "Turma Geral"
-        df_clean[col_turma] = df_clean[col_turma].apply(extrair_num)
-    print("✓ Alinhamento e agregação de turmas (numClassesFixed) concluído.")
-    return df_clean
+        numero = int(num_match.group())
+
+        sigla_match = re.search(r'BCC\d+', texto)
+        sigla = sigla_match.group() if sigla_match else "BCC701"
+
+        periodo_match = re.search(r'\(([\d.]+)\)', texto)
+        periodo_texto = periodo_match.group(1) if periodo_match else periodo_letivo
+
+        rotulo_numero = rotulo_par_turma(numero, excecoes) if regra else str(numero)
+        return f"{rotulo_numero}-{sigla}-{periodo_texto}"
+
+    df_c[col_turma] = df_c[col_turma].apply(remapear)
+    print(f"✓ Turmas renomeadas para o formato par-sigla-período (coluna '{col_turma}').")
+    return df_c
 
 def merge_e_auditoria_ids(df_acad, df_moodle):
     """
@@ -315,15 +387,153 @@ def higienizar_notas_e_compor_medias(df):
 
 def agregar_cliques_moodle(df_moodle, path_tsv):
     """
-    Agrega as 116 colunas brutas do Moodle em categorias consolidadas usando o dicionário TSV.
+    Agrega os recursos do Moodle concluídos por aluno (regra de negócio #7):
+    soma total de recursos concluídos, com quebra por Conteúdo e Tópico,
+    casando por nome exato de recurso com o dicionário TSV.
     """
     if not os.path.exists(path_tsv):
         print("⚠️ Dicionário de recursos TSV não localizado. Mantendo mapeamento básico.")
         return df_moodle
 
     df_map = pd.read_csv(path_tsv, sep=SEPARADOR_TSV)
+    df_c = df_moodle.copy()
+
+    if 'Nome do recurso' not in df_map.columns:
+        print("⚠️ TSV de recursos sem a coluna 'Nome do recurso'. Agregação não realizada.")
+        return df_c
+
+    # Colunas de recurso: qualquer coluna (exceto as de timestamp 'Unnamed: N')
+    # cujos valores incluam os status do MCA -- identifica os recursos
+    # independentemente de quantas colunas acadêmicas/cadastrais vieram no merge.
+    recursos_no_moodle = [
+        c for c in df_c.columns
+        if not str(c).startswith('Unnamed')
+        and df_c[c].isin(['Concluído', 'Não concluído']).any()
+    ]
+
+    mapa_conteudo = df_map.set_index('Nome do recurso')['Conteúdo'].to_dict() if 'Conteúdo' in df_map.columns else {}
+    mapa_topico = df_map.set_index('Nome do recurso')['Tópico'].to_dict() if 'Tópico' in df_map.columns else {}
+
+    casados = [r for r in recursos_no_moodle if r in mapa_conteudo or r in mapa_topico]
+    print(f"✓ {len(casados)} de {len(recursos_no_moodle)} recursos casaram com o dicionário TSV "
+          f"(os demais contam apenas no total).")
+
+    concluidos_bin = df_c[recursos_no_moodle].eq('Concluído')
+    df_c['moodle_total_concluidos'] = concluidos_bin.sum(axis=1)
+
+    for categoria, mapa in [('Conteudo', mapa_conteudo), ('Topico', mapa_topico)]:
+        if not mapa:
+            continue
+        for valor in sorted(set(mapa.values())):
+            recursos_da_categoria = [r for r in recursos_no_moodle if mapa.get(r) == valor]
+            if recursos_da_categoria:
+                nome_coluna = f"moodle_concluidos_{categoria}_{valor}".replace(' ', '_')
+                df_c[nome_coluna] = concluidos_bin[recursos_da_categoria].sum(axis=1)
+
     print("✓ Engenharia de Atributos do Moodle consolidada via mapeamento de recursos.")
-    return df_moodle
+    return df_c
+
+def categorizar_engajamento_moodle(df, col_total='moodle_total_concluidos'):
+    """
+    Classifica cada aluno em um nível de engajamento com o Moodle a partir do
+    total de recursos concluídos: quem não concluiu nada vira 'No Moodle
+    Activity'; os demais são divididos em tercis ('Low'/'Medium'/'High
+    Engagement'). Critério NOVO, não documentado nas regras de negócio
+    originais -- ajuste os limiares aqui se o corte por tercis não fizer
+    sentido para a distribuição real do período.
+    """
+    df_c = df.copy()
+    if col_total not in df_c.columns:
+        print(f"⚠️ Coluna '{col_total}' ausente -- engagement_level não calculado.")
+        return df_c
+
+    ordem = ['No Moodle Activity', 'Low Engagement', 'Medium Engagement', 'High Engagement']
+    niveis = pd.Series('No Moodle Activity', index=df_c.index, dtype=object)
+
+    ativos = df_c[col_total] > 0
+    if ativos.sum() >= 3 and df_c.loc[ativos, col_total].nunique() >= 3:
+        tercis = pd.qcut(
+            df_c.loc[ativos, col_total], q=3,
+            labels=['Low Engagement', 'Medium Engagement', 'High Engagement'],
+            duplicates='drop'
+        )
+        niveis.loc[ativos] = tercis.astype(str)
+    elif ativos.any():
+        # Poucos alunos ativos para dividir em tercis -- todos entram como Medium.
+        niveis.loc[ativos] = 'Medium Engagement'
+
+    df_c['engagement_level'] = pd.Categorical(niveis, categories=ordem, ordered=True)
+    print("✓ Níveis de engajamento com o Moodle (engagement_level) calculados.")
+    return df_c
+
+def construir_eventos_moodle_longos(df_mca_bruto):
+    """
+    Reformata um MCA bruto (id_anonimo + pares de colunas status/timestamp por
+    recurso -- uma coluna 'Unnamed: N' de timestamp logo após cada coluna de
+    status) em uma tabela longa de eventos de conclusão: uma linha por
+    (id_anonimo, Nome do recurso, timestamp). Mantém só recursos concluídos --
+    o Moodle não registra cliques/acessos repetidos, apenas o momento da
+    conclusão. Deve ser chamada em cada MCA bruto individualmente (antes da
+    consolidação entre professores), pois o pareamento posicional
+    status/timestamp não é garantido após um concat com conjuntos de recursos
+    diferentes por professor.
+    """
+    df = df_mca_bruto.copy()
+    colunas_status = [c for c in df.columns if c != 'id_anonimo' and not str(c).startswith('Unnamed')]
+
+    eventos = []
+    for col_status in colunas_status:
+        idx = df.columns.get_loc(col_status)
+        if idx + 1 >= len(df.columns) or not str(df.columns[idx + 1]).startswith('Unnamed'):
+            continue  # pareamento quebrado para este recurso -- ignora com segurança
+        col_timestamp = df.columns[idx + 1]
+
+        bloco = df[['id_anonimo', col_status, col_timestamp]].copy()
+        bloco.columns = ['id_anonimo', 'status', 'timestamp']
+        bloco['Nome do recurso'] = col_status
+        eventos.append(bloco)
+
+    if not eventos:
+        return pd.DataFrame(columns=['id_anonimo', 'Nome do recurso', 'timestamp'])
+
+    df_long = pd.concat(eventos, ignore_index=True)
+    df_long = df_long[df_long['status'] == 'Concluído'].copy()
+    df_long['timestamp'] = pd.to_datetime(df_long['timestamp'], errors='coerce')
+    df_long = df_long.dropna(subset=['timestamp'])
+    return df_long[['id_anonimo', 'Nome do recurso', 'timestamp']]
+
+
+# %% [markdown] id="eventosMoodleMd"
+# # Eventos Moodle em formato longo (para análises temporais e por recurso)
+
+# %% id="eventosMoodleCell"
+# =============================================================================
+# EVENTOS MOODLE EM FORMATO LONGO
+# =============================================================================
+# Relê os MCAs brutos de cada professor listado em PROFESSORES_MCA (em vez de
+# reaproveitar o consolidado largo) para preservar o pareamento posicional
+# status/timestamp por recurso, que pode não sobreviver a um concat entre
+# professores com conjuntos de recursos diferentes. Gera uma linha por
+# (id_anonimo, Nome do recurso, timestamp de conclusão).
+dfs_eventos_moodle = []
+
+for professor, caminhos in PROFESSORES_MCA.items():
+    path_mca = caminhos.get("mca", "")
+    if os.path.exists(path_mca):
+        df_mca_bruto = pd.read_csv(path_mca, sep=SEPARADOR_CSV)
+        df_eventos_prof = construir_eventos_moodle_longos(df_mca_bruto)
+        df_eventos_prof["professor"] = professor
+        dfs_eventos_moodle.append(df_eventos_prof)
+
+if dfs_eventos_moodle:
+    df_eventos_moodle_consolidado = pd.concat(dfs_eventos_moodle, ignore_index=True, sort=False)
+    PATH_TEMP_EVENTOS_MOODLE = DIR_PERIODO / f"_eventos_moodle_consolidado_{PERIODO_LETIVO}.csv"
+    df_eventos_moodle_consolidado.to_csv(PATH_TEMP_EVENTOS_MOODLE, index=False, sep=SEPARADOR_CSV)
+    print(f"✓ Tabela longa de eventos Moodle construída: {len(df_eventos_moodle_consolidado)} conclusões "
+          f"de {df_eventos_moodle_consolidado['id_anonimo'].nunique()} alunos.")
+else:
+    df_eventos_moodle_consolidado = pd.DataFrame(columns=['id_anonimo', 'Nome do recurso', 'timestamp', 'professor'])
+    print("⚠️ Nenhum evento Moodle pôde ser reconstruído para este período.")
 
 
 # %% [markdown] id="PD94K5zdpPg6"
@@ -446,47 +656,159 @@ def exportar_datasets_finais(df, sufixo):
     df_sh.to_csv(arquivo_sheets, index=False, sep=';')
     print(f"\n=== SAÍDAS EXPORTADAS COM SUCESSO ===\n ✓ {arquivo_intl}\n - {arquivo_sheets}")
 
+def plot_temporal_patterns(df_processed_moodle, df_student_metrics, period_name):
+    """
+    Gera um gráfico de linhas com a frequência média de conclusões de recursos
+    por hora do dia, quebrada por nível de engajamento. NOTA: o MCA só registra
+    o timestamp de CONCLUSÃO de cada recurso -- não há log de acessos/cliques
+    repetidos -- então isto mede "quando os alunos concluem recursos", não
+    navegação bruta no Moodle.
+    """
+    df_processed_moodle = df_processed_moodle.copy()
+    df_processed_moodle['hour_of_day'] = df_processed_moodle['timestamp'].dt.hour
 
+    merged_df = pd.merge(
+        df_processed_moodle,
+        df_student_metrics[['id_anonimo', 'engagement_level']],
+        on='id_anonimo',
+        how='left'
+    )
 
-# %% [markdown] id="HmCaYqHOpbfh"
-# # Execução da pipeline
+    if 'engagement_level' in merged_df.columns:
+        engagement_categories = df_student_metrics['engagement_level'].cat.categories
+        merged_df['engagement_level'] = pd.Categorical(
+            merged_df['engagement_level'], categories=engagement_categories, ordered=True
+        )
 
-# %% colab={"base_uri": "https://localhost:8080/", "height": 1000} id="eqV9wd1IXdZ0" outputId="9d5f2d3f-1c21-4e45-a827-cc8bdbe820c2"
-# =============================================================================
-# 6. ORQUESTRAÇÃO DE EXECUÇÃO DA ESTEIRA
-# =============================================================================
-if __name__ == "__main__":
-    print(f"Iniciando orquestração da esteira v3... Período Alvo: {PERIODO_LETIVO}\n")
+    total_accesses_by_hour_level = merged_df.groupby(['engagement_level', 'hour_of_day'], observed=False).size().reset_index(name='total_accesses')
+    unique_students_by_level = df_student_metrics.groupby('engagement_level', observed=False)['id_anonimo'].nunique().reset_index(name='num_students')
 
-    # Execução das submissões e padronização numClassesFixed
-    if os.path.exists(PATH_FULL_DATA_MERGED):
-        df_op_raw = pd.read_csv(PATH_FULL_DATA_MERGED, sep=SEPARADOR_CSV)
-        df_op_fixed = padronizar_turmas_opcoders(df_op_raw)
-        df_ssr_final = processar_ssr_e_prazos_detalhados(df_op_fixed)
+    average_access_data = pd.merge(
+        total_accesses_by_hour_level, unique_students_by_level, on='engagement_level', how='left'
+    )
+    average_access_data['average_accesses_per_student'] = (
+        average_access_data['total_accesses'] / average_access_data['num_students']
+    ).fillna(0)
 
-        df_pivot_res = gerar_tabela_pivo_submissoes(df_op_fixed)
-        if not df_pivot_res.empty:
-            df_pivot_res.to_csv(f"tabelasTotais/matriz_submissoes_pivot_{PERIODO_LETIVO}.csv", index=False)
+    all_hours = pd.DataFrame({'hour_of_day': range(24)})
+    all_engagement_levels = pd.DataFrame({'engagement_level': engagement_categories})
+    full_grid = pd.merge(all_hours.assign(key=1), all_engagement_levels.assign(key=1), on='key').drop('key', axis=1)
 
-    # Execução do cruzamento cadastral e higienização
-    if os.path.exists(PATH_ACADEMICOS) and os.path.exists(PATH_LOGS_MOODLE):
-        df_ac_raw = pd.read_csv(PATH_ACADEMICOS, sep=SEPARADOR_CSV)
-        df_md_raw = pd.read_csv(PATH_LOGS_MOODLE, sep=SEPARADOR_CSV)
+    plot_data = pd.merge(full_grid, average_access_data, on=['engagement_level', 'hour_of_day'], how='left')
+    plot_data['average_accesses_per_student'] = plot_data['average_accesses_per_student'].fillna(0)
+    plot_data = plot_data.sort_values(by=['engagement_level', 'hour_of_day'])
 
-        df_unificado = merge_e_auditoria_ids(df_ac_raw, df_md_raw)
-        df_sanitizado = higienizar_notas_e_compor_medias(df_unificado)
-        df_final_completo = agregar_cliques_moodle(df_sanitizado, PATH_MAP_RECURSOS)
+    plt.figure(figsize=(12, 7))
+    sns.lineplot(
+        data=plot_data, x='hour_of_day', y='average_accesses_per_student',
+        hue='engagement_level', marker='o', palette='deep'
+    )
+    plt.title(f'Média de Conclusões no Moodle por Hora do Dia e Nível de Engajamento - {period_name}', fontsize=16)
+    plt.xlabel('Hora do Dia', fontsize=12)
+    plt.ylabel('Conclusões Médias por Aluno', fontsize=12)
+    plt.xticks(range(24))
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.legend(title='Nível de Engajamento', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    plt.savefig(f"entregas_notas_SSR/padroes_temporais_moodle_{period_name}.png")
+    plt.show()
 
-        # Emissão de relatórios em lote completos
-        gerar_boxplot_notas_com_filtros(df_final_completo, max_absences=35)
-        gerar_boxplot_notas_com_filtros(df_final_completo, max_absences=100)
-        exportar_datasets_finais(df_final_completo, PERIODO_LETIVO)
+def plot_resource_frequency_by_performance(df_processed_moodle, df_student_metrics, period_name, top_n=10):
+    """
+    Gera um gráfico de barras agrupadas com a frequência de conclusão dos
+    top_n recursos mais concluídos, quebrada por nível de engajamento.
+    """
+    merged_df = pd.merge(
+        df_processed_moodle,
+        df_student_metrics[['id_anonimo', 'engagement_level']],
+        on='id_anonimo',
+        how='left'
+    )
 
-    if 'df_ssr_final' in locals() and not df_ssr_final.empty:
-        plotar_dispersao_ssr_vs_notas(df_ssr_final)
+    if 'engagement_level' in merged_df.columns:
+        engagement_categories = df_student_metrics['engagement_level'].cat.categories
+        merged_df['engagement_level'] = pd.Categorical(
+            merged_df['engagement_level'], categories=engagement_categories, ordered=True
+        )
 
+    resource_counts = merged_df['Nome do recurso'].value_counts().nlargest(top_n).index
+    filtered_resources_df = merged_df[merged_df['Nome do recurso'].isin(resource_counts)]
 
-# %% id="KGJQjuUGU7bT"
+    grouped_data = filtered_resources_df.groupby(
+        ['Nome do recurso', 'engagement_level'], observed=False
+    ).size().reset_index(name='access_frequency')
+
+    plt.figure(figsize=(14, 8))
+    sns.barplot(
+        data=grouped_data, x='Nome do recurso', y='access_frequency',
+        hue='engagement_level', palette='viridis'
+    )
+    plt.title(f'Top {top_n} Recursos Mais Concluídos por Nível de Engajamento - {period_name}', fontsize=16)
+    plt.xlabel('Recurso', fontsize=12)
+    plt.ylabel('Frequência de Conclusão', fontsize=12)
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+    plt.legend(title='Nível de Engajamento', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(f"entregas_notas_SSR/top_recursos_por_engajamento_{period_name}.png")
+    plt.show()
+
+def plot_totalEntregas_box(df_entregas):
+    """
+    Boxplot da distribuição de entregas válidas por aluno, por turma.
+    Espera df_entregas já agregado (uma linha por class_name + user_id,
+    com qtd_entregas = total de submissões válidas daquele aluno na turma).
+    """
+    total_deliveries_per_user_and_class = df_entregas.groupby(["class_name", "user_id"])["qtd_entregas"].sum()
+    total_deliveries_per_user_and_class.sort_values(ascending=True, inplace=True)
+
+    fig = px.box(
+        df_entregas, x="class_name", y="qtd_entregas",
+        title=f"Distribuição de entregas feitas por cada usuário na turma {detalhamento}",
+        points="outliers"
+    )
+    fig.update_layout(xaxis_title="Turma", yaxis_title="Número de entregas")
+    fig.write_image(f"qtd_entregas/boxplot_entregas_turma{detalhamento}.png")
+    fig.write_html(f"qtd_entregas/html_boxplot_entregas_turma{detalhamento}.html")
+    fig.show()
+
+def sheet_totalEntregas_box(df_entregas):
+    """
+    Tabela resumo (go.Table) com estatísticas descritivas de entregas por
+    turma, no mesmo agrupamento usado em plot_totalEntregas_box.
+    """
+    total_deliveries_per_user_and_class = df_entregas.groupby(["class_name", "user_id"])["qtd_entregas"].sum()
+    total_deliveries_per_user_and_class.sort_values(ascending=True, inplace=True)
+
+    class_names, q1_values, median_values, q3_values = [], [], [], []
+    average_values, max_values, min_values = [], [], []
+
+    for class_name, data in total_deliveries_per_user_and_class.groupby("class_name"):
+        q1_values.append(np.percentile(data, 25))
+        median_values.append(np.percentile(data, 50))
+        q3_values.append(np.percentile(data, 75))
+        average_values.append(np.mean(data))
+        max_values.append(np.max(data))
+        min_values.append(np.min(data))
+        class_names.append(class_name)
+
+    average_values = [f"{average:.2f}" for average in average_values]
+    max_values = [f"{max_val:.2f}" for max_val in max_values]
+    min_values = [f"{min_val:.2f}" for min_val in min_values]
+    class_names = [f"<b>{name}</b>" for name in class_names]
+
+    fig = go.Figure(data=[go.Table(
+        header=dict(values=['Turma', 'Média', 'Mediana', 'Máximo', 'Mínimo', 'Q1', 'Q3']),
+        cells=dict(
+            values=[class_names, average_values, median_values, max_values, min_values, q1_values, q3_values],
+            fill=dict(color=["paleturquoise", "lavender"]),
+            align=["right", "center"]
+        )
+    )])
+
+    fig.show()
+    fig.write_image(f"qtd_entregas/tabelaAnalise_entregas_turma{detalhamento}.png")
+
 def plot_entregasNotas_scatter_with_status(df_entregas, df_geral, escopo, max_absences=None):
     # Cria cópias para evitar avisos de SettingWithCopyWarning ou modificações nas origens
     df_entregas_copy = df_entregas.copy()
@@ -513,9 +835,24 @@ def plot_entregasNotas_scatter_with_status(df_entregas, df_geral, escopo, max_ab
         how="left"
     )
 
+    # Transparência: reporta quantos alunos ficam de fora por falta de
+    # media_final/faltas ANTES do filtro de teto de faltas abaixo -- se
+    # calculado depois, "faltas" ausente (NaN) já teria sido silenciosamente
+    # descartado pela comparação NaN <= max_absences (sempre False no pandas),
+    # e essa exclusão não aparece em nenhum outro relatório da esteira.
+    n_sem_dados = (merged_df['media_final'].isna() | merged_df['faltas'].isna()).sum()
+    if n_sem_dados > 0:
+        print(f"⚠️ {n_sem_dados} de {len(merged_df)} alunos sem media_final/faltas preenchida "
+              f"(ficarão de fora do scatter, categoria 'Dropped').")
+
     # Aplica o filtro restritivo de teto de ausências, se fornecido por parâmetro
     if max_absences is not None and 'faltas' in merged_df.columns:
+        n_antes = len(merged_df)
         merged_df = merged_df[merged_df['faltas'] <= max_absences].copy()
+        n_excluidos_teto = n_antes - len(merged_df)
+        if n_excluidos_teto > 0:
+            print(f"⚠️ {n_excluidos_teto} alunos excluídos pelo teto de faltas <= {max_absences} "
+                  f"(inclui os sem 'faltas' preenchida, contados acima).")
 
     # Categorização dos perfis com base nas regras de negócio originais
     def categorize_student(row):
@@ -615,7 +952,7 @@ def plot_entregasNotas_scatter_with_status(df_entregas, df_geral, escopo, max_ab
     fig_all.write_image(f"relacaoNotasEntregas/{max_absences}_DivisaoPorGrupos_EntregasNota_Status_all_classes{suffix}.png", width=2280, height=1140)
 
     # Loop de isolamento de gráficos por turmas específicas
-    for class_name, data in merged_df_plotted.groupby(col_turma):
+    for class_name, data in merged_df_plotted.groupby(col_turma_geral):
         if pd.isna(class_name):
             continue
 
@@ -683,3 +1020,79 @@ def plot_entregasNotas_scatter_with_status(df_entregas, df_geral, escopo, max_ab
 
         fig_class.show()
         fig_class.write_image(f"relacaoNotasEntregas/{max_absences}_DivisaoPorGrupos_EntregasNota_Status_Turma{class_name}{suffix}.png", width=1140, height=570)
+
+
+
+# %% [markdown] id="HmCaYqHOpbfh"
+# # Execução da pipeline
+
+# %% colab={"base_uri": "https://localhost:8080/", "height": 1000} id="eqV9wd1IXdZ0" outputId="9d5f2d3f-1c21-4e45-a827-cc8bdbe820c2"
+# =============================================================================
+# 6. ORQUESTRAÇÃO DE EXECUÇÃO DA ESTEIRA
+# =============================================================================
+if __name__ == "__main__":
+    print(f"Iniciando orquestração da esteira v3... Período Alvo: {PERIODO_LETIVO}\n")
+
+    # Execução das submissões e padronização numClassesFixed
+    if os.path.exists(PATH_FULL_DATA_MERGED):
+        df_op_raw = pd.read_csv(PATH_FULL_DATA_MERGED, sep=SEPARADOR_CSV)
+        # Renomeia direto do nome bruto: agrupa aos pares, anexa a sigla do
+        # curso (BCC104 explícito, senão BCC701 por padrão) e o período --
+        # formato final "par-sigla-período" (ex.: "1_2-BCC701-24.2"). Única
+        # regra de padronização de turmas do pipeline.
+        df_op_fixed = renomear_turmas_pareadas_com_sigla(df_op_raw, col_turma='class_name', periodo_letivo=PERIODO_LETIVO)
+        df_ssr_final = processar_ssr_e_prazos_detalhados(df_op_fixed)
+
+        df_pivot_res = gerar_tabela_pivo_submissoes(df_op_fixed)
+        if not df_pivot_res.empty:
+            df_pivot_res.to_csv(f"tabelasTotais/matriz_submissoes_pivot_{PERIODO_LETIVO}.csv", index=False)
+
+        # Base agregada de entregas (uma linha por turma+aluno), usada nos
+        # gráficos de volume de entregas. Conta TODAS as tentativas de
+        # submissão (sem filtrar por grade_accounting) -- validado numericamente
+        # contra a tabela de referência de estatísticas de entregas por turma
+        # do 24-2. Distinto do filtro grade_accounting==1 usado na matriz
+        # pivotada (gerar_tabela_pivo_submissoes), que mede volume de
+        # submissões VÁLIDAS -- métrica diferente, propositalmente mantida.
+        df_entregas = df_op_fixed.groupby(['class_name', 'user_id']).size().reset_index(name='qtd_entregas')
+
+    # Execução do cruzamento cadastral e higienização
+    if os.path.exists(PATH_ACADEMICOS) and os.path.exists(PATH_LOGS_MOODLE):
+        df_ac_raw = pd.read_csv(PATH_ACADEMICOS, sep=SEPARADOR_CSV)
+        df_md_raw = pd.read_csv(PATH_LOGS_MOODLE, sep=SEPARADOR_CSV)
+
+        df_unificado = merge_e_auditoria_ids(df_ac_raw, df_md_raw)
+        df_sanitizado = higienizar_notas_e_compor_medias(df_unificado)
+        df_final_completo = agregar_cliques_moodle(df_sanitizado, PATH_MAP_RECURSOS)
+        df_final_completo = categorizar_engajamento_moodle(df_final_completo)
+        df_student_metrics = df_final_completo
+
+        # Emissão de relatórios em lote completos
+        gerar_boxplot_notas_com_filtros(df_final_completo, max_absences=35)
+        gerar_boxplot_notas_com_filtros(df_final_completo, max_absences=100)
+        exportar_datasets_finais(df_final_completo, PERIODO_LETIVO)
+
+        # Padrões temporais e por recurso, cruzando engajamento com os eventos Moodle
+        if 'df_eventos_moodle_consolidado' in locals() and not df_eventos_moodle_consolidado.empty:
+            plot_temporal_patterns(df_eventos_moodle_consolidado, df_student_metrics, PERIODO_LETIVO)
+            plot_resource_frequency_by_performance(df_eventos_moodle_consolidado, df_student_metrics, PERIODO_LETIVO)
+
+    if 'df_ssr_final' in locals() and not df_ssr_final.empty:
+        plotar_dispersao_ssr_vs_notas(df_ssr_final)
+
+    if 'df_entregas' in locals() and not df_entregas.empty:
+        plot_totalEntregas_box(df_entregas)
+        sheet_totalEntregas_box(df_entregas)
+
+        # Scatter desempenho x volume de entregas (regra de negócio #10). Usa
+        # df_op_fixed como "df_geral" -- NÃO df_final_completo: as colunas
+        # media_final/faltas/obs de full_data_merged.csv já vêm pré-mescladas
+        # por linha desde a origem, no mesmo esquema de anonimização de
+        # user_id (ver CLAUDE.md); cruzar com df_final_completo (esquema
+        # id_aluno, diferente) quebraria o merge silenciosamente. Aplica a
+        # mesma mescla do exame especial (regra #4) antes, para usar a mesma
+        # definição de "nota final" das demais análises -- full_data_merged.csv
+        # não vem com essa mescla já aplicada.
+        df_op_para_scatter = higienizar_notas_e_compor_medias(df_op_fixed)
+        plot_entregasNotas_scatter_with_status(df_entregas, df_op_para_scatter, escopo=PERIODO_LETIVO, max_absences=35)
+        plot_entregasNotas_scatter_with_status(df_entregas, df_op_para_scatter, escopo=PERIODO_LETIVO, max_absences=100)
